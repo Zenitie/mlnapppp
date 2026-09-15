@@ -24,5 +24,7 @@ export interface UserState {
   goals: Goal[];
   lastDailyGoalDate?: string;
   simulatedDate?: string;
+  startDate?: string;
+  fourMonthGoalStatus?: 'PENDING' | 'SUCCESS' | 'FAILED';
   timer?: TimerState;
 }

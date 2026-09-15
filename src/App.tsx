@@ -42,13 +42,24 @@ export default function App() {
         if (!parsed.simulatedDate) {
           parsed.simulatedDate = new Date().toISOString().split('T')[0];
         }
+        if (!parsed.startDate) {
+          parsed.startDate = parsed.simulatedDate;
+        }
+        if (!parsed.fourMonthGoalStatus) {
+          parsed.fourMonthGoalStatus = 'PENDING';
+        }
         if (!parsed.timer) {
           parsed.timer = { isRunning: false, startTime: null, elapsed: 0 };
         }
         return parsed;
       } catch (e) {}
     }
-    return { ...INITIAL_STATE, simulatedDate: new Date().toISOString().split('T')[0] };
+    return { 
+      ...INITIAL_STATE, 
+      simulatedDate: new Date().toISOString().split('T')[0],
+      startDate: new Date().toISOString().split('T')[0],
+      fourMonthGoalStatus: 'PENDING'
+    };
   });
 
   const [activeTab, setActiveTab] = useState<TabType>('MAIN');
@@ -92,10 +103,29 @@ export default function App() {
       let newLevel = prev.level;
       let newXpToNext = prev.xpToNextLevel;
 
-      while (newXp >= newXpToNext) {
-        newXp -= newXpToNext;
-        newLevel += 1;
-        newXpToNext = Math.floor(newXpToNext * 1.5);
+      if (amount > 0) {
+        while (newXp >= newXpToNext) {
+          newXp -= newXpToNext;
+          newLevel += 1;
+          newXpToNext = Math.floor(newXpToNext * 1.5);
+        }
+      } else {
+        // Handle negative XP (level down)
+        const getXpForLevel = (lvl: number) => {
+          let req = 1000;
+          for (let i = 1; i < lvl; i++) req = Math.floor(req * 1.5);
+          return req;
+        };
+
+        while (newXp < 0 && newLevel > 1) {
+          newLevel -= 1;
+          newXpToNext = getXpForLevel(newLevel);
+          newXp += newXpToNext;
+        }
+        
+        if (newXp < 0) {
+          newXp = 0; // Prevent going below 0 XP on level 1
+        }
       }
 
       return {
@@ -108,17 +138,18 @@ export default function App() {
   };
 
   const toggleGoal = (id: string) => {
+    const goal = state.goals.find(g => g.id === id);
+    if (!goal) return;
+
+    const isCompleting = !goal.completed;
+    addXp(isCompleting ? goal.xpReward : -goal.xpReward);
+
     setState(prev => {
       const updatedGoals = prev.goals.map(g => 
-        g.id === id ? { ...g, completed: !g.completed } : g
+        g.id === id ? { ...g, completed: isCompleting } : g
       );
       return { ...prev, goals: updatedGoals };
     });
-
-    const goal = state.goals.find(g => g.id === id);
-    if (goal && !goal.completed) {
-      addXp(goal.xpReward);
-    }
   };
 
   const deleteGoal = (id: string) => {
@@ -254,6 +285,36 @@ export default function App() {
     });
   };
 
+  // ADMIN TOOL: Simulate Forward Month
+  const simulateNextMonth = () => {
+    setState(prev => {
+      const current = new Date(prev.simulatedDate || new Date().toISOString().split('T')[0]);
+      current.setMonth(current.getMonth() + 1);
+      const nextDate = current.toISOString().split('T')[0];
+      
+      return {
+        ...prev,
+        simulatedDate: nextDate,
+        goals: prev.goals.map(g => g.type === 'HABIT' ? { ...g, completed: false } : g)
+      };
+    });
+  };
+
+  // ADMIN TOOL: Simulate Backward Month
+  const simulatePrevMonth = () => {
+    setState(prev => {
+      const current = new Date(prev.simulatedDate || new Date().toISOString().split('T')[0]);
+      current.setMonth(current.getMonth() - 1);
+      const prevDate = current.toISOString().split('T')[0];
+      
+      return {
+        ...prev,
+        simulatedDate: prevDate,
+        goals: prev.goals.map(g => g.type === 'HABIT' ? { ...g, completed: false } : g)
+      };
+    });
+  };
+
   // TIMER LOGIC
   const getElapsedSeconds = () => {
     if (!state.timer) return 0;
@@ -349,6 +410,25 @@ export default function App() {
       setEditingGoal({ ...editingGoal, ...updates });
     } else {
       setNewGoal({ ...newGoal, ...updates } as typeof newGoal);
+    }
+  };
+
+  const isFourMonthsPassed = () => {
+    if (!state.startDate || !state.simulatedDate) return false;
+    const start = new Date(state.startDate);
+    const current = new Date(state.simulatedDate);
+    start.setMonth(start.getMonth() + 4);
+    return current >= start;
+  };
+
+  const handleFourMonthGoalResponse = (success: boolean) => {
+    setState(prev => ({
+      ...prev,
+      fourMonthGoalStatus: success ? 'SUCCESS' : 'FAILED'
+    }));
+    if (success) {
+      addXp(5000);
+      alert('Gratulacje! Otrzymujesz 5000 XP za osiągnięcie głównego celu!');
     }
   };
 
@@ -556,8 +636,8 @@ export default function App() {
                           <p className="text-neutral-400 text-sm leading-relaxed">{goal.description}</p>
                         </div>
                         
-                        {/* Action buttons on hover */}
-                        <div className="opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity shrink-0">
+                        {/* Action buttons */}
+                        <div className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 flex gap-1 transition-opacity shrink-0">
                           <button 
                             onClick={(e) => { e.stopPropagation(); setEditingGoal(goal); }}
                             className="p-1.5 text-neutral-500 hover:text-indigo-400 rounded-md hover:bg-neutral-800 transition-colors"
@@ -657,14 +737,28 @@ export default function App() {
             className="bg-neutral-800 hover:bg-neutral-700 text-white text-xs px-2 py-2.5 rounded-lg transition-colors border border-neutral-700 font-medium flex items-center justify-center gap-1.5"
           >
             <History size={14} className="text-amber-400" />
-            Cofnij o 1 dzień
+            -1 Dzień
           </button>
           <button 
             onClick={simulateNextDay}
             className="bg-neutral-800 hover:bg-neutral-700 text-white text-xs px-2 py-2.5 rounded-lg transition-colors border border-neutral-700 font-medium flex items-center justify-center gap-1.5"
           >
             <CalendarHeart size={14} className="text-emerald-400" />
-            Kolejny dzień
+            +1 Dzień
+          </button>
+          <button 
+            onClick={simulatePrevMonth}
+            className="bg-neutral-800 hover:bg-neutral-700 text-white text-xs px-2 py-2.5 rounded-lg transition-colors border border-neutral-700 font-medium flex items-center justify-center gap-1.5"
+          >
+            <History size={14} className="text-amber-400" />
+            -1 Miesiąc
+          </button>
+          <button 
+            onClick={simulateNextMonth}
+            className="bg-neutral-800 hover:bg-neutral-700 text-white text-xs px-2 py-2.5 rounded-lg transition-colors border border-neutral-700 font-medium flex items-center justify-center gap-1.5"
+          >
+            <CalendarHeart size={14} className="text-emerald-400" />
+            +1 Miesiąc
           </button>
         </div>
       </div>
@@ -752,6 +846,41 @@ export default function App() {
                   </button>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 4-Month Check Modal */}
+      <AnimatePresence>
+        {isFourMonthsPassed() && state.fourMonthGoalStatus === 'PENDING' && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              className="bg-neutral-900 border border-neutral-800 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl p-8 text-center"
+            >
+              <div className="w-20 h-20 bg-indigo-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
+                <Trophy size={40} className="text-indigo-400" />
+              </div>
+              <h2 className="text-3xl font-light mb-4">Czas na podsumowanie</h2>
+              <p className="text-neutral-300 text-lg mb-8">Minęły 4 miesiące odkąd zacząłeś. Czy udało Ci się osiągnąć główny cel: <span className="font-semibold text-white">40k w 4 miesiące</span>?</p>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <button 
+                  onClick={() => handleFourMonthGoalResponse(false)}
+                  className="px-6 py-4 rounded-xl border border-neutral-700 text-neutral-300 font-medium hover:bg-neutral-800 transition-colors text-lg"
+                >
+                  Nie, jeszcze nie
+                </button>
+                <button 
+                  onClick={() => handleFourMonthGoalResponse(true)}
+                  className="px-6 py-4 rounded-xl bg-indigo-600 text-white font-medium hover:bg-indigo-500 transition-colors shadow-lg shadow-indigo-900/50 text-lg flex items-center justify-center gap-2"
+                >
+                  <Sparkles size={20} />
+                  Tak, udało się!
+                </button>
+              </div>
             </motion.div>
           </div>
         )}
