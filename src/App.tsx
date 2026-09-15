@@ -15,6 +15,13 @@ const INITIAL_STATE: Omit<UserState, 'simulatedDate' | 'lastDailyGoalDate'> = {
   xpToNextLevel: 1000,
   totalEarned: 0,
   timer: { isRunning: false, startTime: null, elapsed: 0 },
+  lastClaimedMilestone: 0,
+  milestones: {
+    5: 'Wyjście na dobrą kolację',
+    10: 'Kupno nowej gry',
+    15: 'Cały dzień na relaks',
+    20: 'Nowy gadżet'
+  },
   goals: [
     {
       id: 'habit-1', title: 'Napisz maila do 5 klientów', description: 'Cold mailing - outreach B2B.', type: 'HABIT', xpReward: 100, completed: false, createdAt: Date.now()
@@ -50,6 +57,17 @@ export default function App() {
         }
         if (!parsed.timer) {
           parsed.timer = { isRunning: false, startTime: null, elapsed: 0 };
+        }
+        if (parsed.lastClaimedMilestone === undefined) {
+          parsed.lastClaimedMilestone = 0;
+        }
+        if (!parsed.milestones) {
+          parsed.milestones = {
+            5: 'Wyjście na dobrą kolację',
+            10: 'Kupno nowej gry',
+            15: 'Cały dzień na relaks',
+            20: 'Nowy gadżet'
+          };
         }
         return parsed;
       } catch (e) {}
@@ -432,6 +450,17 @@ export default function App() {
     }
   };
 
+  const nextMilestone = Math.max(5, (Math.floor((state.lastClaimedMilestone || 0) / 5) + 1) * 5);
+  const nextReward = state.milestones?.[nextMilestone] || 'Tajemnicza nagroda';
+  const canClaimMilestone = state.level >= nextMilestone;
+
+  const claimMilestone = () => {
+    setState(prev => ({
+      ...prev,
+      lastClaimedMilestone: nextMilestone
+    }));
+  };
+
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 font-sans selection:bg-indigo-500/30 pb-20">
       
@@ -488,6 +517,62 @@ export default function App() {
         
         {/* Left Column: Goals & Timer */}
         <div className="space-y-6">
+          
+          {/* Progress & Milestone Section */}
+          <div className="bg-neutral-900 border border-neutral-800 rounded-3xl p-6">
+            <div className="flex justify-between items-end mb-4">
+              <div>
+                <h2 className="text-2xl font-light">Poziom {state.level}</h2>
+                <p className="text-neutral-400 text-sm mt-1">
+                  Brakuje {state.xpToNextLevel - state.xp} XP do kolejnego poziomu
+                </p>
+              </div>
+              <div className="text-right">
+                <span className="text-sm font-medium text-indigo-400">{state.xp} / {state.xpToNextLevel} XP</span>
+              </div>
+            </div>
+            
+            <div className="w-full bg-neutral-950 rounded-full h-3 mb-6 overflow-hidden border border-neutral-800">
+              <motion.div 
+                className="h-full bg-indigo-500 rounded-full shadow-[0_0_10px_rgba(99,102,241,0.5)]"
+                initial={{ width: 0 }}
+                animate={{ width: `${progressPercent}%` }}
+                transition={{ duration: 0.5 }}
+              />
+            </div>
+            
+            <div className="flex items-center justify-between bg-neutral-950/50 rounded-2xl p-4 border border-neutral-800">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-amber-500/10 rounded-xl flex items-center justify-center shrink-0">
+                  <Star size={20} className="text-amber-400" />
+                </div>
+                <div className="flex flex-col items-start">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-medium text-neutral-400 uppercase tracking-wider">Nagroda za {nextMilestone} poziom:</span>
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        const newReward = prompt(`Wpisz nową nagrodę za poziom ${nextMilestone}:`, nextReward);
+                        if (newReward !== null && newReward.trim() !== '') {
+                          setState(prev => ({
+                            ...prev,
+                            milestones: { ...(prev.milestones || {}), [nextMilestone]: newReward.trim() }
+                          }));
+                        }
+                      }}
+                      className="p-2 -m-1 text-neutral-500 hover:text-indigo-400 transition-colors z-10 cursor-pointer"
+                      title="Edytuj nagrodę"
+                    >
+                      <Edit2 size={14} />
+                    </button>
+                  </div>
+                  <span className="text-sm text-white font-medium">{nextReward}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <h1 className="text-3xl font-light tracking-tight">Twoja Ścieżka</h1>
             <button 
@@ -720,7 +805,7 @@ export default function App() {
       </main>
 
       {/* Admin Tool Widget */}
-      <div className="fixed bottom-4 right-4 bg-neutral-900 border border-neutral-700 p-4 rounded-2xl shadow-2xl z-40 flex flex-col gap-3 w-[280px]">
+      <div className="hidden sm:flex fixed bottom-4 right-4 bg-neutral-900 border border-neutral-700 p-4 rounded-2xl shadow-2xl z-40 flex-col gap-3 w-[280px]">
         <div className="flex items-center justify-between text-neutral-400">
           <div className="flex items-center gap-2">
             <Settings size={16} className="animate-[spin_4s_linear_infinite]" />
@@ -881,6 +966,37 @@ export default function App() {
                   Tak, udało się!
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Milestone Reward Claim Modal */}
+      <AnimatePresence>
+        {canClaimMilestone && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              className="bg-neutral-900 border border-neutral-800 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl p-8 text-center"
+            >
+              <div className="w-20 h-20 bg-amber-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
+                <Star size={40} className="text-amber-400" />
+              </div>
+              <h2 className="text-3xl font-light mb-2 text-amber-400">Poziom {nextMilestone} Osiągnięty!</h2>
+              <p className="text-neutral-400 text-sm mb-6">Utrzymujesz niesamowite tempo.</p>
+              
+              <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 mb-8">
+                <span className="block text-xs uppercase tracking-wider text-neutral-500 mb-2 font-medium">Twoja Nagroda:</span>
+                <span className="text-xl font-medium text-white">{nextReward}</span>
+              </div>
+              
+              <button 
+                onClick={claimMilestone}
+                className="w-full px-6 py-4 rounded-xl bg-amber-500 text-black font-medium hover:bg-amber-400 transition-colors shadow-lg shadow-amber-900/20 text-lg"
+              >
+                Świetnie, wracam do pracy!
+              </button>
             </motion.div>
           </div>
         )}

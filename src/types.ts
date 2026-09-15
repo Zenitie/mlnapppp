@@ -27,4 +27,6 @@ export interface UserState {
   startDate?: string;
   fourMonthGoalStatus?: 'PENDING' | 'SUCCESS' | 'FAILED';
   timer?: TimerState;
+  milestones?: Record<number, string>;
+  lastClaimedMilestone?: number;
 }
