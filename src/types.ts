@@ -21,6 +21,9 @@ export interface UserState {
   xp: number;
   xpToNextLevel: number;
   totalEarned: number;
+  clientsProgress?: number;
+  adsProgress?: number;
+  meditationProgress?: number;
   goals: Goal[];
   lastDailyGoalDate?: string;
   simulatedDate?: string;

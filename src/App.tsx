@@ -32,6 +32,8 @@ export default function App() {
   const [newGoal, setNewGoal] = useState({ title: '', description: '', xpReward: 100, type: 'SIDE' as GoalType });
   const [aiMessage, setAiMessage] = useState('');
   const [isAdminVisible, setIsAdminVisible] = useState(true);
+  const [isMoneyInputOpen, setIsMoneyInputOpen] = useState(false);
+  const [moneyAmount, setMoneyAmount] = useState('');
   
   // Real-time tick for timer
   const [now, setNow] = useState(Date.now());
@@ -60,22 +62,21 @@ export default function App() {
     setState(prev => {
       let newXp = prev.xp + amount;
       let newLevel = prev.level;
-      let newXpToNext = prev.xpToNextLevel;
 
-      if (amount > 0) {
+      const getXpForLevel = (lvl: number) => {
+        return Math.floor(1000 * Math.pow(1.15, lvl - 1));
+      };
+
+      let newXpToNext = getXpForLevel(newLevel);
+
+      if (amount >= 0) {
         while (newXp >= newXpToNext) {
           newXp -= newXpToNext;
           newLevel += 1;
-          newXpToNext = Math.floor(newXpToNext * 1.5);
+          newXpToNext = getXpForLevel(newLevel);
         }
       } else {
         // Handle negative XP (level down)
-        const getXpForLevel = (lvl: number) => {
-          let req = 1000;
-          for (let i = 1; i < lvl; i++) req = Math.floor(req * 1.5);
-          return req;
-        };
-
         while (newXp < 0 && newLevel > 1) {
           newLevel -= 1;
           newXpToNext = getXpForLevel(newLevel);
@@ -102,6 +103,14 @@ export default function App() {
     });
   };
 
+  const addMoney = (amount: number) => {
+    setState(prev => ({
+      ...prev,
+      totalEarned: (prev.totalEarned || 0) + amount
+    }));
+    addXp(amount); // 1 PLN = 1 XP
+  };
+
   const toggleGoal = (id: string) => {
     const goal = state.goals.find(g => g.id === id);
     if (!goal) return;
@@ -109,6 +118,20 @@ export default function App() {
     const isCompleting = !goal.completed;
     addXp(isCompleting ? goal.xpReward : -goal.xpReward);
     
+    // Check for specific habits
+    let clientsIncrement = 0;
+    let adsIncrement = 0;
+    let meditationIncrement = 0;
+
+    const titleLower = goal.title.toLowerCase();
+    if (titleLower.includes('napisz do 5 klientow') || titleLower.includes('napisz do 5 klientów')) {
+      clientsIncrement = 5;
+    } else if (titleLower.includes('stworz reklame') || titleLower.includes('stwórz reklamę')) {
+      adsIncrement = 1;
+    } else if (titleLower.includes('medytacja 5 minut')) {
+      meditationIncrement = 5;
+    }
+
     const updatedGoal = { ...goal, completed: isCompleting };
     syncUpdateGoal(updatedGoal);
 
@@ -116,7 +139,14 @@ export default function App() {
       const updatedGoals = prev.goals.map(g => 
         g.id === id ? updatedGoal : g
       );
-      return { ...prev, goals: updatedGoals };
+      
+      return { 
+        ...prev, 
+        goals: updatedGoals,
+        clientsProgress: Math.max(0, (prev.clientsProgress || 0) + (isCompleting ? clientsIncrement : -clientsIncrement)),
+        adsProgress: Math.max(0, (prev.adsProgress || 0) + (isCompleting ? adsIncrement : -adsIncrement)),
+        meditationProgress: Math.max(0, (prev.meditationProgress || 0) + (isCompleting ? meditationIncrement : -meditationIncrement))
+      };
     });
   };
 
@@ -170,6 +200,11 @@ export default function App() {
     setIsAddModalOpen(false);
     setEditingGoal(null);
     setNewGoal({ title: '', description: '', xpReward: 100, type: activeTab !== 'TIMER' ? activeTab : 'SIDE' });
+  };
+
+  const openAddForm = () => {
+    setNewGoal({ title: '', description: '', xpReward: 100, type: activeTab !== 'TIMER' ? activeTab : 'SIDE' });
+    setIsAddModalOpen(true);
   };
 
   const generateDailyGoals = async (today: string) => {
@@ -556,7 +591,7 @@ export default function App() {
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <h1 className="text-3xl font-light tracking-tight">Twoja Ścieżka</h1>
             <button 
-              onClick={() => setIsAddModalOpen(true)}
+              onClick={openAddForm}
               className="flex items-center gap-2 bg-white text-black px-4 py-2 rounded-full font-medium hover:bg-neutral-200 transition-colors"
             >
               <Plus size={16} /> Dodaj Własny
@@ -725,9 +760,133 @@ export default function App() {
           </div>
         </div>
 
-        {/* Right Column: AI Assistant */}
+        {/* Right Column: AI Assistant & Finance */}
         <div className="space-y-6">
-          <div className="bg-neutral-900 rounded-3xl border border-neutral-800 p-6 flex flex-col h-[600px] sticky top-24 shadow-2xl">
+          
+          {/* Finanse Widget */}
+          <div className="bg-neutral-900 rounded-3xl border border-neutral-800 p-6 flex flex-col shadow-2xl">
+            <div className="flex justify-between items-center mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-emerald-500/10 rounded-xl flex items-center justify-center shrink-0">
+                  <Briefcase size={20} className="text-emerald-400" />
+                </div>
+                <div>
+                  <h2 className="font-semibold text-white">Twój Kapitał</h2>
+                  <p className="text-xs text-neutral-400">Droga do 1 000 000 zł</p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="mb-4">
+              <div className="flex justify-between text-sm mb-2">
+                <span className="text-neutral-400">Zarobiono</span>
+                <span className="font-bold text-emerald-400">{(state.totalEarned || 0).toLocaleString()} zł</span>
+              </div>
+              <div className="h-3 w-full bg-neutral-800 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-emerald-500 rounded-full transition-all duration-1000 relative"
+                  style={{ width: `${Math.min(((state.totalEarned || 0) / 1000000) * 100, 100)}%` }}
+                />
+              </div>
+              <div className="flex justify-between text-xs text-neutral-500 mt-2">
+                <span>0 zł</span>
+                <span>1 mln zł</span>
+              </div>
+            </div>
+
+            {isMoneyInputOpen ? (
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const value = parseInt(moneyAmount, 10);
+                  if (value > 0) {
+                    addMoney(value);
+                  }
+                  setMoneyAmount('');
+                  setIsMoneyInputOpen(false);
+                }}
+                className="flex gap-2"
+              >
+                <input 
+                  type="number"
+                  min="1"
+                  value={moneyAmount}
+                  onChange={(e) => setMoneyAmount(e.target.value)}
+                  placeholder="Kwota w PLN"
+                  className="flex-1 bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-emerald-500 text-white"
+                  autoFocus
+                />
+                <button 
+                  type="button"
+                  onClick={() => setIsMoneyInputOpen(false)}
+                  className="px-4 py-3 bg-neutral-800 hover:bg-neutral-700 rounded-xl text-neutral-400 transition-colors"
+                >
+                  <X size={16} />
+                </button>
+                <button 
+                  type="submit"
+                  className="px-4 py-3 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-white font-medium transition-colors"
+                >
+                  <CheckCircle size={16} />
+                </button>
+              </form>
+            ) : (
+              <button 
+                onClick={() => setIsMoneyInputOpen(true)}
+                className="w-full flex items-center justify-center gap-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 py-3 rounded-xl transition-colors text-sm font-medium border border-emerald-500/20"
+              >
+                <Plus size={16} /> Dodaj Zarobki (+XP)
+              </button>
+            )}
+          </div>
+          
+          {/* Progress Tracking Widget */}
+          <div className="bg-neutral-900 rounded-3xl border border-neutral-800 p-6 flex flex-col shadow-2xl space-y-4">
+            <h3 className="font-semibold text-white mb-2 flex items-center gap-2">
+              <Sparkles size={16} className="text-amber-400" /> Własne Postępy
+            </h3>
+            
+            <div>
+              <div className="flex justify-between text-xs mb-1.5">
+                <span className="text-neutral-400">Klienci</span>
+                <span className="font-medium text-amber-400">{state.clientsProgress || 0}</span>
+              </div>
+              <div className="h-2 w-full bg-neutral-800 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-amber-500 rounded-full transition-all duration-500 relative"
+                  style={{ width: `${Math.min(((state.clientsProgress || 0) / 100) * 100, 100)}%` }} // Default max 100 as an example
+                />
+              </div>
+            </div>
+
+            <div>
+              <div className="flex justify-between text-xs mb-1.5">
+                <span className="text-neutral-400">Reklamy</span>
+                <span className="font-medium text-blue-400">{state.adsProgress || 0}</span>
+              </div>
+              <div className="h-2 w-full bg-neutral-800 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-blue-500 rounded-full transition-all duration-500 relative"
+                  style={{ width: `${Math.min(((state.adsProgress || 0) / 50) * 100, 100)}%` }} // Default max 50 as an example
+                />
+              </div>
+            </div>
+
+            <div>
+              <div className="flex justify-between text-xs mb-1.5">
+                <span className="text-neutral-400">Medytacja (minuty)</span>
+                <span className="font-medium text-purple-400">{state.meditationProgress || 0}</span>
+              </div>
+              <div className="h-2 w-full bg-neutral-800 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-purple-500 rounded-full transition-all duration-500 relative"
+                  style={{ width: `${Math.min(((state.meditationProgress || 0) / 300) * 100, 100)}%` }} // Default max 300 min as an example
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-neutral-900 rounded-3xl border border-neutral-800 p-6 flex flex-col h-[500px] sticky top-24 shadow-2xl">
             
             <div className="flex items-center gap-3 mb-6">
               <div className="w-10 h-10 bg-indigo-500/10 rounded-xl flex items-center justify-center shrink-0">
@@ -839,9 +998,20 @@ export default function App() {
                   lastClaimedMilestone: 0
                 }));
               }}
-              className="col-span-2 bg-red-900/30 hover:bg-red-900/50 text-red-400 text-xs px-2 py-2.5 rounded-lg transition-colors border border-red-900/50 font-medium flex items-center justify-center gap-1.5"
+              className="bg-red-900/30 hover:bg-red-900/50 text-red-400 text-xs px-2 py-2.5 rounded-lg transition-colors border border-red-900/50 font-medium flex items-center justify-center gap-1.5"
             >
-              <RotateCcw size={14} /> Resetuj Level
+              <RotateCcw size={14} /> Reset Level
+            </button>
+            <button 
+              onClick={() => {
+                setState(prev => ({
+                  ...prev,
+                  totalEarned: 0
+                }));
+              }}
+              className="bg-red-900/30 hover:bg-red-900/50 text-red-400 text-xs px-2 py-2.5 rounded-lg transition-colors border border-red-900/50 font-medium flex items-center justify-center gap-1.5"
+            >
+              <RotateCcw size={14} /> Reset Pieniądze
             </button>
           </div>
         </div>
