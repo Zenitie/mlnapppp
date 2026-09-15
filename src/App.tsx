@@ -4,81 +4,26 @@ import {
   Trophy, Star, Target, Sparkles, Plus, 
   MessageSquare, CheckCircle, Circle, Briefcase, 
   BrainCircuit, X, Loader2, CalendarHeart, Trash2, Edit2, Settings,
-  Timer, Play, Pause, RotateCcw, History
+  Timer, Play, Pause, RotateCcw, History, LogIn, LogOut
 } from 'lucide-react';
 import { PWAInstallButton } from './PWAInstallButton';
 import type { Goal, GoalType, UserState, TimerState } from './types';
-
-const INITIAL_STATE: Omit<UserState, 'simulatedDate' | 'lastDailyGoalDate'> = {
-  level: 1,
-  xp: 0,
-  xpToNextLevel: 1000,
-  totalEarned: 0,
-  timer: { isRunning: false, startTime: null, elapsed: 0 },
-  lastClaimedMilestone: 0,
-  milestones: {
-    5: 'Wyjście na dobrą kolację',
-    10: 'Kupno nowej gry',
-    15: 'Cały dzień na relaks',
-    20: 'Nowy gadżet'
-  },
-  goals: [
-    {
-      id: 'habit-1', title: 'Napisz maila do 5 klientów', description: 'Cold mailing - outreach B2B.', type: 'HABIT', xpReward: 100, completed: false, createdAt: Date.now()
-    },
-    {
-      id: 'habit-2', title: 'Zrób trening', description: 'Zdrowe ciało to zdrowy umysł.', type: 'HABIT', xpReward: 50, completed: false, createdAt: Date.now()
-    },
-    {
-      id: 'habit-3', title: 'Koduj/ucz się', description: 'Rozwój w automatyzacjach Make/Zapier/kodowanie.', type: 'HABIT', xpReward: 200, completed: false, createdAt: Date.now()
-    },
-    {
-      id: 'initial-1', title: 'Zdobądź pierwszego klienta na automatyzację', description: 'Zarób pierwsze pieniądze, sprzedając prostą automatyzację za minimum 500 PLN.', type: 'MAIN', xpReward: 1500, completed: false, createdAt: Date.now()
-    }
-  ]
-};
+import { useRPGState } from './hooks/useRPGState';
 
 type TabType = GoalType | 'TIMER';
 
 export default function App() {
-  const [state, setState] = useState<UserState>(() => {
-    const saved = localStorage.getItem('rpg_state');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (!parsed.simulatedDate) {
-          parsed.simulatedDate = new Date().toISOString().split('T')[0];
-        }
-        if (!parsed.startDate) {
-          parsed.startDate = parsed.simulatedDate;
-        }
-        if (!parsed.fourMonthGoalStatus) {
-          parsed.fourMonthGoalStatus = 'PENDING';
-        }
-        if (!parsed.timer) {
-          parsed.timer = { isRunning: false, startTime: null, elapsed: 0 };
-        }
-        if (parsed.lastClaimedMilestone === undefined) {
-          parsed.lastClaimedMilestone = 0;
-        }
-        if (!parsed.milestones) {
-          parsed.milestones = {
-            5: 'Wyjście na dobrą kolację',
-            10: 'Kupno nowej gry',
-            15: 'Cały dzień na relaks',
-            20: 'Nowy gadżet'
-          };
-        }
-        return parsed;
-      } catch (e) {}
-    }
-    return { 
-      ...INITIAL_STATE, 
-      simulatedDate: new Date().toISOString().split('T')[0],
-      startDate: new Date().toISOString().split('T')[0],
-      fourMonthGoalStatus: 'PENDING'
-    };
-  });
+  const { 
+    state, 
+    setState, 
+    user, 
+    isAuthLoading, 
+    login, 
+    logout, 
+    syncAddGoals, 
+    syncUpdateGoal, 
+    syncDeleteGoal 
+  } = useRPGState();
 
   const [activeTab, setActiveTab] = useState<TabType>('MAIN');
   const [isAiLoading, setIsAiLoading] = useState(false);
@@ -86,14 +31,10 @@ export default function App() {
   const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
   const [newGoal, setNewGoal] = useState({ title: '', description: '', xpReward: 100, type: 'SIDE' as GoalType });
   const [aiMessage, setAiMessage] = useState('');
+  const [isAdminVisible, setIsAdminVisible] = useState(true);
   
   // Real-time tick for timer
   const [now, setNow] = useState(Date.now());
-
-  // Save state on change
-  useEffect(() => {
-    localStorage.setItem('rpg_state', JSON.stringify(state));
-  }, [state]);
 
   // AI Daily Side Goal & Habit Reset logic
   useEffect(() => {
@@ -146,11 +87,17 @@ export default function App() {
         }
       }
 
+      let newClaimedMilestone = prev.lastClaimedMilestone;
+      if (newLevel < (prev.lastClaimedMilestone || 0)) {
+        newClaimedMilestone = Math.floor(newLevel / 5) * 5;
+      }
+
       return {
         ...prev,
         xp: newXp,
         level: newLevel,
-        xpToNextLevel: newXpToNext
+        xpToNextLevel: newXpToNext,
+        lastClaimedMilestone: newClaimedMilestone
       };
     });
   };
@@ -161,16 +108,20 @@ export default function App() {
 
     const isCompleting = !goal.completed;
     addXp(isCompleting ? goal.xpReward : -goal.xpReward);
+    
+    const updatedGoal = { ...goal, completed: isCompleting };
+    syncUpdateGoal(updatedGoal);
 
     setState(prev => {
       const updatedGoals = prev.goals.map(g => 
-        g.id === id ? { ...g, completed: isCompleting } : g
+        g.id === id ? updatedGoal : g
       );
       return { ...prev, goals: updatedGoals };
     });
   };
 
   const deleteGoal = (id: string) => {
+    syncDeleteGoal(id);
     setState(prev => ({
       ...prev,
       goals: prev.goals.filter(g => g.id !== id)
@@ -183,20 +134,31 @@ export default function App() {
     if (!targetData.title.trim()) return;
 
     if (editingGoal) {
-      setState(prev => ({
-        ...prev,
-        goals: prev.goals.map(g => g.id === editingGoal.id ? editingGoal : g)
-      }));
+      if (editingGoal.id.startsWith('milestone-')) {
+        const mId = parseInt(editingGoal.id.split('-')[1]);
+        setState(prev => ({
+          ...prev,
+          milestones: { ...(prev.milestones || {}), [mId]: editingGoal.title.trim() }
+        }));
+      } else {
+        syncUpdateGoal(editingGoal);
+        setState(prev => ({
+          ...prev,
+          goals: prev.goals.map(g => g.id === editingGoal.id ? editingGoal : g)
+        }));
+      }
     } else {
+      const newGoalObj = {
+        ...newGoal,
+        id: `manual-${Date.now()}`,
+        completed: false,
+        createdAt: Date.now()
+      };
+      syncAddGoals([newGoalObj]);
       setState(prev => ({
         ...prev,
         goals: [
-          {
-            ...newGoal,
-            id: `manual-${Date.now()}`,
-            completed: false,
-            createdAt: Date.now()
-          },
+          newGoalObj,
           ...prev.goals
         ]
       }));
@@ -207,7 +169,7 @@ export default function App() {
   const closeForm = () => {
     setIsAddModalOpen(false);
     setEditingGoal(null);
-    setNewGoal({ title: '', description: '', xpReward: 100, type: 'SIDE' });
+    setNewGoal({ title: '', description: '', xpReward: 100, type: activeTab !== 'TIMER' ? activeTab : 'SIDE' });
   };
 
   const generateDailyGoals = async (today: string) => {
@@ -219,13 +181,14 @@ export default function App() {
       });
       const data = await response.json();
       if (Array.isArray(data)) {
-        const generatedGoals: Goal[] = data.map(g => ({
+        const generatedGoals: Goal[] = data.map((g: any) => ({
           ...g,
           id: `daily-${Date.now()}-${Math.random()}`,
           completed: false,
           createdAt: Date.now()
         }));
 
+        syncAddGoals(generatedGoals);
         setState(prev => ({
           ...prev,
           lastDailyGoalDate: today,
@@ -252,13 +215,14 @@ export default function App() {
       
       const data = await response.json();
       if (Array.isArray(data)) {
-        const generatedGoals: Goal[] = data.map(g => ({
+        const generatedGoals: Goal[] = data.map((g: any) => ({
           ...g,
           id: `ai-${Date.now()}-${Math.random()}`,
           completed: false,
           createdAt: Date.now()
         }));
 
+        syncAddGoals(generatedGoals);
         setState(prev => ({
           ...prev,
           goals: [...generatedGoals, ...prev.goals]
@@ -267,7 +231,6 @@ export default function App() {
       }
     } catch (e) {
       console.error(e);
-      alert('Nie udało się wygenerować celów. Spróbuj ponownie.');
     } finally {
       setIsAiLoading(false);
     }
@@ -369,40 +332,22 @@ export default function App() {
   };
 
   const resetTimer = () => {
-    if (confirm('Czy na pewno chcesz zresetować timer bez odbierania nagrody?')) {
-      setState(prev => ({
-        ...prev,
-        timer: { isRunning: false, startTime: null, elapsed: 0 }
-      }));
-    }
+    setState(prev => ({
+      ...prev,
+      timer: { isRunning: false, startTime: null, elapsed: 0 }
+    }));
   };
 
   const claimTimerXp = () => {
      const seconds = getElapsedSeconds();
      const minutes = Math.floor(seconds / 60);
      if (minutes > 0) {
-        setState(prev => {
-          let newXp = prev.xp + (minutes * 10);
-          let newLevel = prev.level;
-          let newXpToNext = prev.xpToNextLevel;
-
-          while (newXp >= newXpToNext) {
-            newXp -= newXpToNext;
-            newLevel += 1;
-            newXpToNext = Math.floor(newXpToNext * 1.5);
-          }
-
-          return {
-            ...prev,
-            xp: newXp,
-            level: newLevel,
-            xpToNextLevel: newXpToNext,
-            timer: { isRunning: false, startTime: null, elapsed: 0 }
-          };
-        });
-        alert(`Świetna praca! Otrzymujesz ${minutes * 10} XP za ${minutes} min skupienia.`);
-     } else {
-        alert('Musisz skupić się na co najmniej 1 pełną minutę, aby zdobyć XP.');
+        const earnedXp = minutes * 1;
+        addXp(earnedXp);
+        setState(prev => ({
+          ...prev,
+          timer: { isRunning: false, startTime: null, elapsed: 0 }
+        }));
      }
   };
 
@@ -446,7 +391,6 @@ export default function App() {
     }));
     if (success) {
       addXp(5000);
-      alert('Gratulacje! Otrzymujesz 5000 XP za osiągnięcie głównego celu!');
     }
   };
 
@@ -460,6 +404,14 @@ export default function App() {
       lastClaimedMilestone: nextMilestone
     }));
   };
+
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen bg-neutral-950 flex items-center justify-center">
+        <Loader2 className="animate-spin text-indigo-500" size={32} />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 font-sans selection:bg-indigo-500/30 pb-20">
@@ -475,8 +427,32 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-6">
+            {!isAdminVisible && (
+              <button 
+                onClick={() => setIsAdminVisible(true)}
+                className="text-neutral-600 hover:text-neutral-400 transition-colors p-1"
+                title="Pokaż Admin Tool"
+              >
+                <Settings size={16} />
+              </button>
+            )}
             <PWAInstallButton />
-            <div className="flex items-center gap-2">
+            
+            {user ? (
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-neutral-400 hidden sm:block">{user.email}</span>
+                <button onClick={logout} className="text-neutral-500 hover:text-white transition-colors p-1" title="Wyloguj się z chmury">
+                  <LogOut size={18} />
+                </button>
+              </div>
+            ) : (
+              <button onClick={login} className="flex items-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border border-neutral-700">
+                <LogIn size={14} />
+                <span className="hidden sm:inline">Logowanie do chmury</span>
+              </button>
+            )}
+
+            <div className="flex items-center gap-2 hidden sm:flex">
               <Target size={18} className="text-emerald-400" />
               <div className="flex flex-col">
                 <span className="text-xs text-neutral-400 uppercase tracking-wider font-semibold">Cel: 40k (4 mies.)</span>
@@ -553,13 +529,17 @@ export default function App() {
                       onClick={(e) => {
                         e.stopPropagation();
                         e.preventDefault();
-                        const newReward = prompt(`Wpisz nową nagrodę za poziom ${nextMilestone}:`, nextReward);
-                        if (newReward !== null && newReward.trim() !== '') {
-                          setState(prev => ({
-                            ...prev,
-                            milestones: { ...(prev.milestones || {}), [nextMilestone]: newReward.trim() }
-                          }));
-                        }
+                        const currentReward = state.milestones?.[nextMilestone] || '';
+                        setEditingGoal({ 
+                          id: `milestone-${nextMilestone}`, 
+                          title: currentReward, 
+                          description: 'milestone-reward',
+                          type: 'SIDE',
+                          xpReward: 0,
+                          completed: false,
+                          createdAt: 0 
+                        });
+                        setIsAddModalOpen(true);
                       }}
                       className="p-2 -m-1 text-neutral-500 hover:text-indigo-400 transition-colors z-10 cursor-pointer"
                       title="Edytuj nagrodę"
@@ -630,7 +610,7 @@ export default function App() {
                 className="p-8 text-center border border-neutral-800 rounded-3xl bg-neutral-900/50 flex flex-col items-center justify-center min-h-[400px]"
               >
                 <h2 className="text-2xl font-light mb-2">Skupienie = XP</h2>
-                <p className="text-neutral-400 text-sm mb-8 max-w-md">Włącz timer na czas pracy lub nauki. Timer działa w tle nawet po zamknięciu karty przeglądarki. Zdobędziesz 10 XP za każdą pełną minutę.</p>
+                <p className="text-neutral-400 text-sm mb-8 max-w-md">Włącz timer na czas pracy lub nauki. Timer działa w tle nawet po zamknięciu karty przeglądarki. Zdobędziesz 1 XP za każdą pełną minutę.</p>
                 
                 <div className="w-56 h-56 rounded-full border border-neutral-800 flex items-center justify-center mb-8 relative bg-neutral-950 shadow-inner">
                   {state.timer?.isRunning && (
@@ -805,48 +785,67 @@ export default function App() {
       </main>
 
       {/* Admin Tool Widget */}
-      <div className="hidden sm:flex fixed bottom-4 right-4 bg-neutral-900 border border-neutral-700 p-4 rounded-2xl shadow-2xl z-40 flex-col gap-3 w-[280px]">
-        <div className="flex items-center justify-between text-neutral-400">
-          <div className="flex items-center gap-2">
-            <Settings size={16} className="animate-[spin_4s_linear_infinite]" />
-            <span className="text-xs font-bold uppercase tracking-wider text-neutral-300">Admin Tool</span>
+      {isAdminVisible && (
+        <div className="hidden sm:flex fixed bottom-4 right-4 bg-neutral-900 border border-neutral-700 p-4 rounded-2xl shadow-2xl z-40 flex-col gap-3 w-[280px]">
+          <div className="flex items-center justify-between text-neutral-400">
+            <div className="flex items-center gap-2">
+              <Settings size={16} className="animate-[spin_4s_linear_infinite]" />
+              <span className="text-xs font-bold uppercase tracking-wider text-neutral-300">Admin Tool</span>
+            </div>
+            <button onClick={() => setIsAdminVisible(false)} className="hover:text-white transition-colors">
+              <X size={16} />
+            </button>
+          </div>
+          <div className="flex items-center justify-between bg-neutral-950 px-3 py-2 rounded-lg border border-neutral-800">
+            <span className="text-xs text-neutral-500 font-medium">Data Systemu:</span>
+            <span className="text-sm text-indigo-400 font-mono">{state.simulatedDate}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button 
+              onClick={simulatePrevDay}
+              className="bg-neutral-800 hover:bg-neutral-700 text-white text-xs px-2 py-2.5 rounded-lg transition-colors border border-neutral-700 font-medium flex items-center justify-center gap-1.5"
+            >
+              <History size={14} className="text-amber-400" />
+              -1 Dzień
+            </button>
+            <button 
+              onClick={simulateNextDay}
+              className="bg-neutral-800 hover:bg-neutral-700 text-white text-xs px-2 py-2.5 rounded-lg transition-colors border border-neutral-700 font-medium flex items-center justify-center gap-1.5"
+            >
+              <CalendarHeart size={14} className="text-emerald-400" />
+              +1 Dzień
+            </button>
+            <button 
+              onClick={simulatePrevMonth}
+              className="bg-neutral-800 hover:bg-neutral-700 text-white text-xs px-2 py-2.5 rounded-lg transition-colors border border-neutral-700 font-medium flex items-center justify-center gap-1.5"
+            >
+              <History size={14} className="text-amber-400" />
+              -1 Miesiąc
+            </button>
+            <button 
+              onClick={simulateNextMonth}
+              className="bg-neutral-800 hover:bg-neutral-700 text-white text-xs px-2 py-2.5 rounded-lg transition-colors border border-neutral-700 font-medium flex items-center justify-center gap-1.5"
+            >
+              <CalendarHeart size={14} className="text-emerald-400" />
+              +1 Miesiąc
+            </button>
+            <button 
+              onClick={() => {
+                setState(prev => ({
+                  ...prev,
+                  level: 1,
+                  xp: 0,
+                  xpToNextLevel: 1000,
+                  lastClaimedMilestone: 0
+                }));
+              }}
+              className="col-span-2 bg-red-900/30 hover:bg-red-900/50 text-red-400 text-xs px-2 py-2.5 rounded-lg transition-colors border border-red-900/50 font-medium flex items-center justify-center gap-1.5"
+            >
+              <RotateCcw size={14} /> Resetuj Level
+            </button>
           </div>
         </div>
-        <div className="flex items-center justify-between bg-neutral-950 px-3 py-2 rounded-lg border border-neutral-800">
-          <span className="text-xs text-neutral-500 font-medium">Data Systemu:</span>
-          <span className="text-sm text-indigo-400 font-mono">{state.simulatedDate}</span>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <button 
-            onClick={simulatePrevDay}
-            className="bg-neutral-800 hover:bg-neutral-700 text-white text-xs px-2 py-2.5 rounded-lg transition-colors border border-neutral-700 font-medium flex items-center justify-center gap-1.5"
-          >
-            <History size={14} className="text-amber-400" />
-            -1 Dzień
-          </button>
-          <button 
-            onClick={simulateNextDay}
-            className="bg-neutral-800 hover:bg-neutral-700 text-white text-xs px-2 py-2.5 rounded-lg transition-colors border border-neutral-700 font-medium flex items-center justify-center gap-1.5"
-          >
-            <CalendarHeart size={14} className="text-emerald-400" />
-            +1 Dzień
-          </button>
-          <button 
-            onClick={simulatePrevMonth}
-            className="bg-neutral-800 hover:bg-neutral-700 text-white text-xs px-2 py-2.5 rounded-lg transition-colors border border-neutral-700 font-medium flex items-center justify-center gap-1.5"
-          >
-            <History size={14} className="text-amber-400" />
-            -1 Miesiąc
-          </button>
-          <button 
-            onClick={simulateNextMonth}
-            className="bg-neutral-800 hover:bg-neutral-700 text-white text-xs px-2 py-2.5 rounded-lg transition-colors border border-neutral-700 font-medium flex items-center justify-center gap-1.5"
-          >
-            <CalendarHeart size={14} className="text-emerald-400" />
-            +1 Miesiąc
-          </button>
-        </div>
-      </div>
+      )}
 
       {/* Add / Edit Goal Modal */}
       <AnimatePresence>
@@ -890,29 +889,33 @@ export default function App() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-neutral-400 mb-1.5">Typ</label>
-                    <select 
-                      value={formData.type}
-                      onChange={(e) => updateFormData({ type: e.target.value as GoalType })}
-                      className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 text-white appearance-none"
-                    >
-                      <option value="MAIN">Cel Główny</option>
-                      <option value="SIDE">Cel Poboczny</option>
-                      <option value="HABIT">Nawyk</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-neutral-400 mb-1.5">Nagroda XP</label>
-                    <input 
-                      type="number" 
-                      min="10"
-                      step="10"
-                      value={formData.xpReward}
-                      onChange={(e) => updateFormData({ xpReward: parseInt(e.target.value) || 0 })}
-                      className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 text-white"
-                    />
-                  </div>
+                  {!editingGoal?.id.startsWith('milestone-') && (
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-neutral-400 mb-1.5">Typ</label>
+                        <select 
+                          value={formData.type}
+                          onChange={(e) => updateFormData({ type: e.target.value as GoalType })}
+                          className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 text-white appearance-none"
+                        >
+                          <option value="MAIN">Cel Główny</option>
+                          <option value="SIDE">Cel Poboczny</option>
+                          <option value="HABIT">Nawyk</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-neutral-400 mb-1.5">Nagroda XP</label>
+                        <input 
+                          type="number" 
+                          min="10"
+                          step="10"
+                          value={formData.xpReward}
+                          onChange={(e) => updateFormData({ xpReward: parseInt(e.target.value) || 0 })}
+                          className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-indigo-500 text-white"
+                        />
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 <div className="pt-4 flex gap-3">

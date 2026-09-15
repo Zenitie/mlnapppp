@@ -1,0 +1,58 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Stores user progression and settings",
+      "type": "object",
+      "properties": {
+        "level": { "type": "number", "description": "Current user level" },
+        "xp": { "type": "number", "description": "Current XP" },
+        "xpToNextLevel": { "type": "number", "description": "XP required for next level" },
+        "totalEarned": { "type": "number", "description": "Total XP earned over time" },
+        "lastDailyGoalDate": { "type": "string", "description": "Date string of last daily goal generation" },
+        "simulatedDate": { "type": "string", "description": "The simulated date for the admin tool" },
+        "startDate": { "type": "string", "description": "Date string of when the tracker started" },
+        "fourMonthGoalStatus": { "type": "string", "enum": ["PENDING", "SUCCESS", "FAILED"], "description": "Status of the 4 month goal" },
+        "timer": {
+          "type": "object",
+          "properties": {
+            "isRunning": { "type": "boolean" },
+            "startTime": { "type": "number" },
+            "elapsed": { "type": "number" }
+          }
+        },
+        "milestones": {
+          "type": "object",
+          "description": "User defined milestones mapped by level"
+        },
+        "lastClaimedMilestone": { "type": "number" },
+        "updatedAt": { "type": "timestamp" }
+      },
+      "required": ["level", "xp", "xpToNextLevel"]
+    },
+    "Goal": {
+      "title": "Quest / Goal",
+      "description": "A single goal/habit for the user",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 150 },
+        "description": { "type": "string", "maxLength": 500 },
+        "type": { "type": "string", "enum": ["MAIN", "SIDE", "HABIT"] },
+        "xpReward": { "type": "number" },
+        "completed": { "type": "boolean" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["title", "type", "xpReward", "completed", "createdAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Stores user progression"
+    },
+    "users/{userId}/goals/{goalId}": {
+      "schema": { "$ref": "#/entities/Goal" },
+      "description": "User goals and habits"
+    }
+  }
+}

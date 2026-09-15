@@ -1,0 +1,85 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global Helpers
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() { return request.auth != null; }
+
+    // User Profile Validation
+    function isValidUser(data) {
+      return data.keys().hasAll(['level', 'xp', 'xpToNextLevel'])
+        && data.level is number
+        && data.xp is number
+        && data.xpToNextLevel is number
+        && data.get('totalEarned', 0) is number
+        && data.get('lastDailyGoalDate', '') is string
+        && data.get('simulatedDate', '') is string
+        && data.get('startDate', '') is string
+        && data.get('fourMonthGoalStatus', 'PENDING') in ['PENDING', 'SUCCESS', 'FAILED']
+        && data.get('lastClaimedMilestone', 0) is number
+        && (data.get('updatedAt', request.time) == request.time);
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && request.auth.uid == userId;
+      allow list: if isSignedIn() && request.auth.uid == userId;
+
+      allow create: if isSignedIn()
+        && request.auth.uid == userId
+        && isValidId(userId)
+        && isValidUser(incoming());
+
+      allow update: if isSignedIn()
+        && request.auth.uid == userId
+        && isValidUser(incoming())
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'level', 'xp', 'xpToNextLevel', 'totalEarned', 
+            'lastDailyGoalDate', 'simulatedDate', 'startDate', 
+            'fourMonthGoalStatus', 'timer', 'milestones', 
+            'lastClaimedMilestone', 'updatedAt'
+          ])
+        );
+    }
+
+    // Goals Validation
+    function isValidGoal(data) {
+      return data.keys().hasAll(['title', 'type', 'xpReward', 'completed', 'createdAt'])
+        && data.title is string && data.title.size() <= 150
+        && data.get('description', '') is string && data.get('description', '').size() <= 500
+        && data.type in ['MAIN', 'SIDE', 'HABIT']
+        && data.xpReward is number
+        && data.completed is bool
+        && data.createdAt is number;
+    }
+
+    match /users/{userId}/goals/{goalId} {
+      allow get: if isSignedIn() && request.auth.uid == userId;
+      allow list: if isSignedIn() && request.auth.uid == userId;
+      
+      allow create: if isSignedIn()
+        && request.auth.uid == userId
+        && isValidId(userId) && isValidId(goalId)
+        && isValidGoal(incoming());
+
+      allow update: if isSignedIn()
+        && request.auth.uid == userId
+        && isValidId(userId) && isValidId(goalId)
+        && isValidGoal(incoming())
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'title', 'description', 'type', 'xpReward', 'completed', 'createdAt'
+          ])
+        );
+
+      allow delete: if isSignedIn() && request.auth.uid == userId;
+    }
+  }
+}
